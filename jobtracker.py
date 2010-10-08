@@ -128,7 +128,8 @@ class JobTracker(pb.Root):
             deferreds = []
             for reducer, mapper in itertools.product(self.workers, self.workers):
                 mapper_ip = mapper.broker.transport.getPeer().host
-                d = worker.callRemote('shuffle', jobid, mapid_template % numreducer, numreducer, mapper_ip, PORT+1 ) #jobid, mapid, partition_number, remoteHost, remotePort
+                mapper_port = 8992
+                d = worker.callRemote('shuffle', jobid, mapid_template % numreducer, numreducer, mapper_ip, mapper_port) #jobid, mapid, partition_number, remoteHost, remotePort
                 deferreds.append(d)
                 numreducer+=1
                 nummap+=1

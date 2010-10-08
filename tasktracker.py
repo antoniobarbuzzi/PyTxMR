@@ -14,6 +14,8 @@ from SimpleReader import SimpleReader
 import newpartitionspiller
 import time
 
+import kvstuff
+
 class Worker(pb.Root):
     def __init__(self, id):
         self.id = id
@@ -23,14 +25,17 @@ class Worker(pb.Root):
         print self.__hdr, "Init"
         #self.node = node.Execute()
         #self.spiller={}
-        self.map_store = newpartitionspiller.createKVServer(PORT+1) #FIXME add something to close Server with program finish
+        #self.map_store = newpartitionspiller.createKVServer(PORT+1) #FIXME add something to close Server with program finish
+        self.map_store = kvstuff.MapKVstore()
+        self.red_store = kvstuff.RedKVstore()
         #self.reduce_store = reducestorer()
         
         
         #store.bookJob(JOBID, NUMPARTITION)
         #put = store.getPut(JOBID, MAPID)
         
-    ### INITIAL PHASE ###
+    #### INITIAL PHASE ###
+    
     def connectToJT(self, host, port, num=0):
         print self.__hdr, 'Connecting to JT ...'
         factory = pb.PBClientFactory()
@@ -62,12 +67,91 @@ class Worker(pb.Root):
     def remote_initJob(self, jobid, numreducer):
         assert(jobid not in self.job_data)
         self.job_data[jobid]=numreducer
-        self.map_store.bookJob(jobid, numreducer)
+        self.map_store.bookJob(jobid, numreducer)#FIXME????
+        self.red_store.bookJob(jobid)#FIXME????
     
     def remote_destroyJob(self, jobid):
         assert(jobid in self.job_data)
         del self.job_data[jobid]
         self.map_store.destroyJob(jobid)
+    
+    # Shuffle
+
+        #redkv = RedKVstore()
+        #redkv.bookJob(JOBID)
+        #put = redkv.getPut(JOBID, 0)
+
+        #def getIt(x):
+            #r = ResultGetter(x)
+            #return r.getRemoteResult(JOBID, MAPID, random.randint(0,NUMPARTITION-1) , put)
+        #cf = pb.PBClientFactory()
+        #reactor.connectTCP("localhost", PORT, cf)
+        #def printKV(BHO, redkv):#FIXME: BHO
+            #print "=~<>~"*10
+            #print BHO
+            #for k, it in redkv.getIterator(JOBID, 0):
+                #print k
+                #for kv in it:
+                    #print "\t", kv
+            #print "=~<>~"*10
+        #cf.getRootObject().addCallback(getIt).addCallback(printKV, redkv)
+
+    #Shuffle Client
+    def remote_shuffle(self, jobid, mapid, numpartition, host, port):
+        ''' JT asks a reducer to contact a mapper and to start copying data from the mapper
+        '''
+        #TEST Remove printKV
+        def printKV(BHO, redkv, jobid, reduceid):
+            import array
+            print "=~<>~"*10
+            print BHO
+            i=0
+            for k, it in redkv.getIterator(jobid, reduceid):
+                num=0
+                for kv in it:
+                    num+=1
+                print k,num
+                
+                if i==10:
+                    break
+                i+=1
+                
+                #for kv in it:
+                    #print "\t", kv
+            print "=~<>~"*10
+        
+        print self.__hdr, "RPC: shuffling data from %s:%d (%s@%s@%d)" % (host, port, jobid, mapid, numpartition)
+        d = self.connectToWorker(host, port)
+        putter = self.red_store.getPut(jobid, 0)#FIXME ReducerID
+        print "FIXME"*10, "ReduceID"
+        d.addCallback(self.getKVShuffler).addCallback(self.getKVs, jobid, mapid, numpartition, putter).addCallback(printKV, self.red_store, jobid, 0)#FIXME ReducerID
+        return d
+
+    def connectToWorker(self, host, port): #TODO: merge connectToJT e connectToWorker
+        print self.__hdr, 'Connecting to Worker (%s:%s) ...' %(host, port)
+        factory = pb.PBClientFactory()
+        reactor.connectTCP(host, port, factory)
+        return factory.getRootObject()
+    
+    def getKVs(self, remote, jobid, mapid, numpartition, putter):
+        #print "REMOTE=%s - type = %s" %(remote, type(remote))
+        #print dir(remote)
+        peer = remote.broker.transport.getPeer()
+        print self.__hdr, "CONNECTED to %s:%d" % (peer.host, peer.port)
+        r = kvstuff.ResultGetter(remote) #FIXME: ResultGetter maybe is useless, or not?
+        return r.getRemoteResult(jobid, mapid, numpartition, putter)
+        
+    def getKVShuffler(self, remote):
+        return remote.callRemote("getKVShuffler")
+        #.addCallbacks(self.registeredToJT, self.failure)
+
+    # Shuffler Server Side
+    
+    def remote_getKVShuffler(self):
+        '''
+        '''
+        return kvstuff.KVReferenceable(self.map_store)
+    
         
     
     ### EXECUTOR ###
@@ -77,13 +161,6 @@ class Worker(pb.Root):
         print self.__hdr, "RPC: execute MAP (%s:%s)" %(jobid, mapid)
         numreducer = self.job_data[jobid]
         d = self.add_map(jobid, mapid, 'MapReduceExample', 'MapExample', numreducer, SimpleReader("./warandpeace.txt"))
-        return d
-        
-    def remote_shuffle(self, jobid, mapid, partition_number, remoteHost, remotePort):
-        assert(jobid in self.job_data)
-        print self.__hdr, "RPC: shuffling data from %s:%d (%s@%s@%d)" % (remoteHost, remotePort, jobid, mapid, partition_number)
-        #TODO: optimize in case of local transfer
-        d = self.reduce_store.downloadData(remoteHost, remotePort, jobid, mapid, partition_number)
         return d
     
     def remote_executeReduce(self, jobid, reduceid, partition_number):
