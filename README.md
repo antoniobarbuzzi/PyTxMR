@@ -28,6 +28,7 @@ jobtracker (jobtracker.py) e workers (tasktracker.py, da rinonimare) comunicano 
 Output dei mapper
 -----------
 
+DOCUMENTAZIONE VECCHIA... bisogna passare a kvstuff, che usa perspective broker e pager e una migliore serializzazione (netstring pickled keyvalues)
 L'output dei mapper:
     - salvato su KeyValueStore (in newpartitionspiller.py)
     - esiste un'unica istanza di KeyValueStore x tutti i job
