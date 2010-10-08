@@ -23,7 +23,10 @@ class Worker(pb.Root):
         print self.__hdr, "Init"
         #self.node = node.Execute()
         #self.spiller={}
-        self.store = newpartitionspiller.createKVServer(PORT+1) #FIXME add something to close Server with program finish
+        self.map_store = newpartitionspiller.createKVServer(PORT+1) #FIXME add something to close Server with program finish
+        #self.reduce_store = reducestorer()
+        
+        
         #store.bookJob(JOBID, NUMPARTITION)
         #put = store.getPut(JOBID, MAPID)
         
@@ -33,7 +36,8 @@ class Worker(pb.Root):
         factory = pb.PBClientFactory()
         reactor.connectTCP(host, port, factory)
         factory.getRootObject().addCallbacks(self.registerToJT, self.retryConnection, errbackArgs=(host, port, num))
-        
+
+    #TODO replace using ReconnectingPBClientFactory or something similar
     def retryConnection(self, reason, host, port, num):
         num=(num+1)%10
         t = min(60, 2**num)
@@ -58,12 +62,12 @@ class Worker(pb.Root):
     def remote_initJob(self, jobid, numreducer):
         assert(jobid not in self.job_data)
         self.job_data[jobid]=numreducer
-        self.store.bookJob(jobid, numreducer)
+        self.map_store.bookJob(jobid, numreducer)
     
     def remote_destroyJob(self, jobid):
         assert(jobid in self.job_data)
         del self.job_data[jobid]
-        self.store.destroyJob(jobid)
+        self.map_store.destroyJob(jobid)
         
     
     ### EXECUTOR ###
@@ -78,6 +82,9 @@ class Worker(pb.Root):
     def remote_shuffle(self, jobid, mapid, partition_number, remoteHost, remotePort):
         assert(jobid in self.job_data)
         print self.__hdr, "RPC: shuffling data from %s:%d (%s@%s@%d)" % (remoteHost, remotePort, jobid, mapid, partition_number)
+        #TODO: optimize in case of local transfer
+        d = self.reduce_store.downloadData(remoteHost, remotePort, jobid, mapid, partition_number)
+        return d
     
     def remote_executeReduce(self, jobid, reduceid, partition_number):
         assert(jobid in self.job_data)
@@ -114,12 +121,12 @@ class Worker(pb.Root):
         #readerfilename = readerfilename.strip('.py')
         #reader = __import__(readerclass, None, None, [''])
         #reader = reader.__dict__['mapclass']
-        put_function = self.store.getPut(job_id, mapid)
+        put_function = self.map_store.getPut(job_id, mapid)
         map_args = (mapid, mapfunz, numreducer, put_function, reader)
 
         print "Launch thread to execute map:", map_args
         d = threads.deferToThread(self.execute_map, *map_args)
-        ###TODO Add callback to flush self.store for map
+        ###TODO Add callback to flush self.map_store for map
         return d
         
         
@@ -143,6 +150,9 @@ class Worker(pb.Root):
     
 
 if __name__ == '__main__':
+    from twisted.python import log
+    import sys
+    log.startLogging(sys.stdout)
     w1 = Worker('Worker1')
     #w2 = Worker('fake-id2')
     w1.connectToJT('localhost', 9000)

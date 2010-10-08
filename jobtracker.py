@@ -171,7 +171,10 @@ class JobTracker(pb.Root):
         print "DONE", args, kwargs
             
             
-   
+
+import sys
+from twisted.python import log
+log.startLogging(sys.stdout)
 
 jt = JobTracker()
 reactor.listenTCP(9000, pb.PBServerFactory(jt))

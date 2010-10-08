@@ -10,7 +10,7 @@ try:
 except ImportError:
     import pickle
 
-class KeyValueStore:
+class KeyValueStore(object):
     def __init__(self):
         self.__job_list = set()
         self.__numreducer_x_job = {}
@@ -41,6 +41,7 @@ class KeyValueStore:
             assert(numreducer < self.__numreducer_x_job[jobid])
             l[numreducer].append((key, value))
         return put
+    
      
     def getSortedIterator(self, jobid, mapid, partition_number): # once you get an iterator, you cannot use put anymore
         self.__debug_invalid_list.setdefault(jobid, []).append(mapid)
@@ -71,16 +72,25 @@ class KeyValueSender: ## per (jobid, partition_number)
         self.__paused = True
         print('pausing connection from %s' % (self.__proto.transport.getPeer()))
     
-    def resumeProducing(self):
+    
+    def resumeProducing(self): #TODO: replace with avro or a better serialization protocol
+        import time
         self.__paused = False
         it = self.__it
+        print "\tsending data..."
+        count=0
         for kv in it:
             a = pickle.dumps(kv)
-            self.__proto.transport.write(a)
-            self.__proto.transport.write('\n\n')
-            if self.__paused:
-                print('PAUSE')
-                break
+            yield a
+            #self.__proto.transport.write(a)
+            #self.__proto.transport.write('\n\n')
+            #time.sleep(0.1)
+            #if self.__paused:
+                #print('PAUSE')
+                #break
+            #count+=1
+            #if count==10:
+                #pass
 
         if not self.__paused:
             self.__proto.transport.unregisterProducer()
@@ -95,7 +105,7 @@ class KeyValueSender: ## per (jobid, partition_number)
 class KeyValueProtocol(LineReceiver):
     def connectionMade(self):
         print('connection made from %s' % (self.transport.getPeer()))
-        self.transport.write('JobID?\r\n')
+    #    self.transport.write('JobID?\r\n')
 
     def lineReceived(self, line):
         jobid, mapid, partition_number = line.split('@')
@@ -106,9 +116,9 @@ class KeyValueProtocol(LineReceiver):
         
         self.producer = KeyValueSender(self, iterator)
         self.transport.registerProducer(self.producer, True)
+        
         self.setRawMode()
         self.producer.begin()
-        #self.producer.resumeProducing()
 
     def connectionLost(self, reason):
         print('connection lost from %s [%s]' % (self.transport.getPeer(), reason.getErrorMessage()))
@@ -131,8 +141,8 @@ def createKVServer(port):
 
 def __main__():
     import random
-    JOBID='Job_01'
-    MAPID='MAP_001'
+    JOBID='Job001'
+    MAPID='Map001'
     NUMPARTITION=5
     PORT=4096
     
@@ -140,7 +150,7 @@ def __main__():
     store.bookJob(JOBID, NUMPARTITION)
     put = store.getPut(JOBID, MAPID)
     
-    for _ in xrange(100):
+    for _ in xrange(1000):
         k, v = random.randint(0, 100), random.randint(0, 5)
         red = random.randint(0, NUMPARTITION-1)
         put(red, k,v)
@@ -151,6 +161,11 @@ def __main__():
 
 
 if __name__ == '__main__':
+    import sys
+    from twisted.internet import reactor
+    from twisted.python import log
+    log.startLogging(sys.stdout)
+
     __main__()
     reactor.run()
     
